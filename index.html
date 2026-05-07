@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Durak</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #1a5c2a;
+    color: #fff;
+    font-family: Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Status bar ── */
+  #status-bar {
+    background: rgba(0,0,0,0.5);
+    padding: 8px 16px;
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    font-size: 14px;
+    flex-wrap: wrap;
+  }
+  #status-bar span { white-space: nowrap; }
+  .trump-label { color: #ffd700; font-weight: bold; font-size: 16px; }
+  .atk-label   { color: #ff9944; font-weight: bold; }
+  .def-label   { color: #44ccff; font-weight: bold; }
+
+  /* ── Main game area ── */
+  #game-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  /* ── Section labels ── */
+  .section-label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.6);
+    text-align: center;
+    margin-bottom: 2px;
+  }
+
+  /* ── Opponent hand ── */
+  #opponent-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  #opponent-cards {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  /* ── Table ── */
+  #table-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  #table-pairs {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    min-height: 130px;
+  }
+  .table-pair {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .table-pair .defense-slot {
+    opacity: 0.4;
+    border: 2px dashed #888;
+    border-radius: 8px;
+  }
+
+  /* ── Deck/trump area ── */
+  #deck-area {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  #deck-count {
+    font-size: 13px;
+    color: #ccc;
+    text-align: center;
+  }
+
+  /* ── Cards ── */
+  .card {
+    width: 60px;
+    height: 88px;
+    border-radius: 8px;
+    border: 2px solid rgba(255,255,255,0.3);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 4px 5px;
+    cursor: pointer;
+    user-select: none;
+    transition: transform 0.12s, box-shadow 0.12s;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .card:active { transform: scale(0.95); }
+
+  /* Face-up card */
+  .card.face-up {
+    background: #fffcf0;
+    color: #111;
+  }
+  .card.face-up.red { color: #cc1111; }
+
+  /* Card back */
+  .card.face-down {
+    background: #1e50a0;
+    cursor: default;
+  }
+  .card.face-down::after {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 4px;
+  }
+
+  /* Trump glow */
+  .card.trump-card {
+    box-shadow: 0 0 0 3px #ffd700;
+  }
+
+  /* Selected */
+  .card.selected {
+    transform: translateY(-12px);
+    box-shadow: 0 6px 20px rgba(255,220,50,0.8);
+    border-color: #ffd700;
+  }
+
+  /* Valid move highlight */
+  .card.valid {
+    border-color: #44ff88;
+    box-shadow: 0 0 8px rgba(68,255,136,0.6);
+  }
+
+  /* Table attack card — clickable when defending */
+  .card.table-target {
+    border-color: #ff9944;
+    box-shadow: 0 0 8px rgba(255,153,68,0.7);
+    cursor: pointer;
+  }
+  .card.table-target.targeted {
+    border-color: #ff4444;
+    box-shadow: 0 0 12px rgba(255,68,68,0.9);
+  }
+
+  .card-rank {
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1;
+  }
+  .card-suit {
+    font-size: 13px;
+    line-height: 1;
+  }
+  .card-center {
+    font-size: 22px;
+    text-align: center;
+    line-height: 1;
+  }
+  .card-rank-bot {
+    font-size: 16px;
+    font-weight: bold;
+    transform: rotate(180deg);
+    text-align: right;
+    line-height: 1;
+  }
+
+  /* ── My hand ── */
+  #my-hand-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  #my-cards {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  /* ── Action buttons ── */
+  #action-bar {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+    padding: 8px;
+  }
+  .btn {
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 2px solid rgba(255,255,255,0.3);
+    background: rgba(40,40,80,0.9);
+    color: #fff;
+    font-size: 15px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn:hover  { background: rgba(80,80,140,0.95); }
+  .btn.danger { background: rgba(140,30,30,0.9); border-color: #ff6666; }
+  .btn.danger:hover { background: rgba(180,40,40,0.95); }
+  .btn.transfer { background: rgba(30,100,60,0.9); border-color: #44ff88; }
+  .btn.transfer:hover { background: rgba(40,140,80,0.95); }
+  .card.swapping {
+    border-color: #ff44ff !important;
+    box-shadow: 0 0 12px rgba(255,68,255,0.8) !important;
+    transform: translateY(-8px);
+  }
+
+
+  /* ── Info bar ── */
+  #info-bar {
+    background: rgba(0,0,0,0.75);
+    border-top: 1px solid rgba(255,255,255,0.15);
+    padding: 8px 16px;
+    text-align: center;
+    min-height: 52px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+  }
+  #hint {
+    font-size: 15px;
+    color: #ffd060;
+    font-weight: bold;
+  }
+  #hint.error { color: #ff6666; }
+  #subinfo {
+    font-size: 12px;
+    color: #aaa;
+  }
+
+  /* ── Lobby / waiting screens ── */
+  #waiting, #gameover {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 20px;
+    padding: 40px;
+    text-align: center;
+  }
+  #lobby { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: 20px; padding: 40px; text-align: center; }
+  #lobby h1, #gameover h1 { font-size: 42px; color: #ffd700; }
+  #lobby input {
+    padding: 12px;
+    font-size: 18px;
+    border-radius: 8px;
+    border: 2px solid #44aa66;
+    background: rgba(0,0,0,0.4);
+    color: #fff;
+    width: 260px;
+    text-align: center;
+  }
+  #lobby input::placeholder { color: #888; }
+  .room-url {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid #44aa66;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 14px;
+    color: #88ffbb;
+    word-break: break-all;
+    max-width: 340px;
+  }
+
+  /* ── Game over overlay ── */
+  #gameover-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.82);
+    z-index: 100;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    text-align: center;
+  }
+  #gameover-overlay h1 { font-size: 48px; color: #ff5555; }
+  #gameover-overlay .winner { font-size: 28px; color: #ffd700; }
+
+  /* Hide game board initially */
+  #game-board { display: none; flex-direction: column; flex: 1; }
+</style>
+</head>
+<body>
+
+<!-- ── LOBBY ── -->
+<div id="lobby" style="display:flex">
+  <h1>Durak</h1>
+  <p style="color:#aaa">Enter your name to join room: <strong style="color:#ffd700" id="room-name-display"></strong></p>
+  <input id="name-input" placeholder="Your name" maxlength="16" autofocus>
+  <button class="btn" onclick="joinGame()">Join Game</button>
+  <p style="color:#888;font-size:13px">Share this page URL with your opponent</p>
+  <div class="room-url" id="room-url"></div>
+</div>
+
+<!-- ── WAITING ── -->
+<div id="waiting" style="display:none;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:16px;padding:40px;text-align:center">
+  <h2 style="color:#ffd700">Game Lobby</h2>
+  <p style="color:#aaa">Share this link with your opponents:</p>
+  <div class="room-url" id="wait-url"></div>
+  <div id="lobby-players" style="margin:16px 0;font-size:18px"></div>
+  <div id="lobby-status" style="color:#aaa;font-size:14px"></div>
+  <button id="start-btn" class="btn" style="display:none;font-size:18px;padding:12px 32px" onclick="send({action:'start_game'})">Start Game</button>
+</div>
+
+<!-- ── GAME BOARD ── -->
+<div id="game-board">
+
+  <!-- Status bar -->
+  <div id="status-bar">
+    <span class="trump-label" id="trump-display">Trump: ?</span>
+    <span id="deck-display">Deck: ?</span>
+    <span id="discard-display">Discard: ?</span>
+    <span class="atk-label" id="atk-display">ATK: ?</span>
+    <span class="def-label" id="def-display">DEF: ?</span>
+    <span id="phase-display" style="color:#888"></span>
+  </div>
+
+  <div id="game-area" style="position:relative">
+
+    <!-- Opponent -->
+    <div id="opponent-area">
+      <div class="section-label" id="opponent-label">Opponent</div>
+      <div id="opponent-cards"></div>
+    </div>
+
+    <!-- Table -->
+    <div id="table-area">
+      <div class="section-label">Table</div>
+      <div id="table-pairs"></div>
+    </div>
+
+    <!-- Deck (absolute right) -->
+    <div id="deck-area">
+      <div id="trump-card-display"></div>
+      <div id="deck-count">?</div>
+    </div>
+
+  </div>
+
+  <!-- My hand -->
+  <div id="my-hand-area">
+    <div class="section-label" id="my-label">Your hand</div>
+    <div id="my-cards"></div>
+  </div>
+
+  <!-- Action buttons -->
+  <div id="action-bar"></div>
+
+  <!-- Info bar -->
+  <div id="info-bar">
+    <div id="hint">Connecting...</div>
+    <div style="display:flex;justify-content:center;align-items:center;gap:12px">
+      <div id="subinfo" style="flex:1;text-align:center"></div>
+      <div id="conn-status" style="font-size:12px;color:#888;white-space:nowrap"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Game over overlay -->
+<div id="gameover-overlay">
+  <h1 id="go-title"></h1>
+  <div id="go-body"></div>
+  <button class="btn" onclick="location.reload()">Play Again</button>
+</div>
+
+<style>
+@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+</style>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+// Get room ID from URL path or from server replacement
+const ROOM_ID = (function() {
+    const fromServer = "__ROOM_ID__";
+    if (fromServer && fromServer !== "__ROOM_ID__") return fromServer;
+    const parts = window.location.pathname.split('/');
+    return parts[parts.length - 1] || 'lobby';
+})();
+let ws = null;
+let state = null;          // latest server state
+let myName = "";
+let selectedCard = null;   // card string selected from hand
+let targetedAtk = null;    // attack card on table targeted for defense
+let errorTimeout = null;
+let handOrder = [];         // custom card order maintained by player
+let dragIdx = null;         // index being dragged
+let lastPingTime = 0;       // when we received last ping
+let pingMs = 0;             // round-trip estimate
+let connectionStatus = "connecting";  // connecting, connected, reconnecting, disconnected
+let swapIdx = null;          // first card tapped for swap (mobile)
+
+// ---------------------------------------------------------------------------
+// WebSocket connection
+// ---------------------------------------------------------------------------
+let reconnectAttempts = 0;
+let maxReconnect = 50;
+let reconnectTimer = null;
+let wasConnected = false;
+
+function joinGame() {
+  myName = document.getElementById("name-input").value.trim() || "Player";
+  // Save name so we can reconnect
+  try { sessionStorage.setItem("durak_name", myName); } catch(e) {}
+  document.getElementById("lobby").style.display = "none";
+  document.getElementById("waiting").style.display = "flex";
+  connectWS();
+}
+
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/ws/${ROOM_ID}`);
+
+  ws.onopen = () => {
+    reconnectAttempts = 0;
+    connectionStatus = "connected";
+    updateStatusDot();
+    ws.send(JSON.stringify({ name: myName }));
+  };
+
+  ws.onmessage = (evt) => {
+    const msg = JSON.parse(evt.data);
+    // Respond to server pings + measure latency
+    if (msg.type === "ping") {
+      const now = Date.now();
+      if (lastPingTime > 0) pingMs = now - lastPingTime;
+      lastPingTime = now;
+      connectionStatus = "connected";
+      send({ type: "pong" });
+      updateStatusDot();
+      return;
+    }
+    handleMessage(msg);
+  };
+
+  ws.onclose = () => {
+    if (wasConnected) {
+      connectionStatus = "reconnecting";
+      updateStatusDot();
+      setHint("Connection lost - reconnecting...", true);
+      scheduleReconnect();
+    } else {
+      connectionStatus = "disconnected";
+      updateStatusDot();
+      setHint("Disconnected from server.", true);
+    }
+  };
+
+  ws.onerror = () => {};  // onclose handles it
+}
+
+function scheduleReconnect() {
+  if (reconnectAttempts >= maxReconnect) {
+    setHint("Could not reconnect. Please refresh the page.", true);
+    return;
+  }
+  // Exponential backoff: 1s, 2s, 4s, 8s... max 15s
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 15000);
+  reconnectAttempts++;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    setHint(`Reconnecting... (attempt ${reconnectAttempts})`, true);
+    connectWS();
+  }, delay);
+}
+
+function send(data) {
+  if (ws && ws.readyState === WebSocket.OPEN)
+    ws.send(JSON.stringify(data));
+}
+
+// ---------------------------------------------------------------------------
+// Message handler
+// ---------------------------------------------------------------------------
+function handleMessage(msg) {
+  if (msg.type === "waiting") {
+    setHint(msg.message);
+    return;
+  }
+  if (msg.type === "start") {
+    wasConnected = true;
+    document.getElementById("waiting").style.display = "none";
+    document.getElementById("game-board").style.display = "flex";
+    return;
+  }
+  if (msg.type === "lobby_update") {
+    document.getElementById("waiting").style.display = "flex";
+    document.getElementById("lobby-players").innerHTML =
+      msg.players.map((n,i) => `<div>${i===0 ? "&#9733; " : ""}${n}${i===0 ? " (host)" : ""}</div>`).join("");
+    document.getElementById("lobby-status").textContent = msg.message;
+    const startBtn = document.getElementById("start-btn");
+    if (msg.is_host && msg.count >= 2) {
+      startBtn.style.display = "inline-block";
+      startBtn.textContent = `Start Game (${msg.count} players)`;
+    } else if (!msg.is_host) {
+      startBtn.style.display = "none";
+      document.getElementById("lobby-status").textContent += " — waiting for host to start";
+    } else {
+      startBtn.style.display = "none";
+    }
+    return;
+  }
+  if (msg.type === "lobby_update") {
+    document.getElementById("waiting").style.display = "flex";
+    const playersEl = document.getElementById("lobby-players");
+    playersEl.innerHTML = msg.players.map((name, i) => 
+      `<div style="color:${i===0?'#ff9944':'#44ccff'};margin:4px">${i===0?'(host) ':''}${name}</div>`
+    ).join("");
+    document.getElementById("lobby-status").textContent = 
+      `${msg.count} player${msg.count>1?'s':''} joined (2-4 needed)`;
+    // Only host (index 0) sees start button, and only with 2+ players
+    const isHost = msg.players[0] === myName;
+    const startBtn = document.getElementById("start-btn");
+    if (isHost && msg.can_start) {
+      startBtn.style.display = "block";
+      startBtn.textContent = `Start Game (${msg.count} players)`;
+    } else {
+      startBtn.style.display = "none";
+    }
+    return;
+  }
+  if (msg.type === "reconnected") {
+    wasConnected = true;
+    document.getElementById("waiting").style.display = "none";
+    document.getElementById("game-board").style.display = "flex";
+    setHint("Reconnected!", false);
+    return;
+  }
+  if (msg.type === "opponent_reconnected") {
+    showError(msg.message);
+    return;
+  }
+  if (msg.type === "opponent_disconnected") {
+    setHint(msg.message, true);
+    return;
+  }
+  if (msg.type === "error") {
+    showError(msg.message);
+    return;
+  }
+  if (msg.type === "disconnect") {
+    setHint(msg.message, true);
+    return;
+  }
+  if (msg.type === "state") {
+    state = msg;
+    selectedCard = null;
+    targetedAtk = null;
+    // Preserve custom hand order: keep existing cards in order, append new ones
+    if (handOrder.length > 0) {
+      const newHand = state.your_hand;
+      const kept = handOrder.filter(c => newHand.includes(c));
+      const added = newHand.filter(c => !kept.includes(c));
+      handOrder = [...kept, ...added];
+    } else {
+      handOrder = [...state.your_hand];
+    }
+    render();
+    if (msg.log) setSubInfo(msg.log);
+    if (msg.durak) showGameOver(msg);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Render
+// ---------------------------------------------------------------------------
+function render() {
+  if (!state) return;
+  renderStatusBar();
+  renderOpponent();
+  renderTable();
+  renderMyHand();
+  renderActionBar();
+  renderHint();
+}
+
+function renderStatusBar() {
+  document.getElementById("trump-display").textContent  = `Trump: ${state.trump}`;
+  document.getElementById("deck-display").textContent   = `Deck: ${state.deck_size}`;
+  document.getElementById("discard-display").textContent= `Discard: ${state.discard_size}`;
+  document.getElementById("atk-display").textContent    = `ATK: ${state.attacker}`;
+  document.getElementById("def-display").textContent    = `DEF: ${state.defender}`;
+  document.getElementById("phase-display").textContent  = `Phase: ${state.phase}`;
+}
+
+function renderOpponent() {
+  const opponents = (state.all_players || []).filter(n => n !== state.your_name);
+  const el = document.getElementById("opponent-cards");
+  el.innerHTML = "";
+  
+  const labelParts = [];
+  opponents.forEach(name => {
+    const count = state.hand_sizes[name] || 0;
+    const isAtk = name === state.attacker;
+    const isDef = name === state.defender;
+    const isWinner = state.winners.includes(name);
+    
+    // Separator between opponents
+    const oppDiv = document.createElement("div");
+    oppDiv.style.cssText = "display:flex;flex-direction:column;align-items:center;margin:0 8px";
+    
+    // Name label with role
+    const nameEl = document.createElement("div");
+    let roleTag = "";
+    if (isWinner) roleTag = " (out)";
+    else if (isAtk) roleTag = " (ATK)";
+    else if (isDef) roleTag = " (DEF)";
+    nameEl.textContent = `${name} (${count})${roleTag}`;
+    nameEl.style.cssText = `font-size:12px;margin-bottom:4px;color:${isAtk ? "#ff9944" : isDef ? "#44ccff" : isWinner ? "#888" : "#ccc"}`;
+    oppDiv.appendChild(nameEl);
+    
+    // Card backs
+    const cardsRow = document.createElement("div");
+    cardsRow.style.cssText = "display:flex;gap:3px";
+    for (let i = 0; i < Math.min(count, 10); i++) {
+      const back = makeCardBack();
+      back.style.width = "40px";
+      back.style.height = "58px";
+      cardsRow.appendChild(back);
+    }
+    if (count > 10) {
+      const more = document.createElement("div");
+      more.textContent = `+${count-10}`;
+      more.style.cssText = "color:#aaa;font-size:12px;align-self:center;margin-left:4px";
+      cardsRow.appendChild(more);
+    }
+    oppDiv.appendChild(cardsRow);
+    el.appendChild(oppDiv);
+  });
+  
+  document.getElementById("opponent-label").textContent =
+    opponents.length === 1 ? `${opponents[0]}` : `Opponents (${opponents.length})`;
+
+  // Trump card + deck stack
+  const deckEl = document.getElementById("trump-card-display");
+  deckEl.innerHTML = "";
+  if (state.deck_size > 0) {
+    const tc = makeCardFace(state.trump_card, false);
+    tc.style.outline = "3px solid #ffd700";
+    deckEl.appendChild(tc);
+  }
+  document.getElementById("deck-count").textContent =
+    state.deck_size > 0 ? `${state.deck_size} cards` : "Deck empty";
+}
+
+function renderTable() {
+  const el = document.getElementById("table-pairs");
+  el.innerHTML = "";
+  const attacks = state.table.attacks;
+  const defenses = state.table.defenses;
+
+  attacks.forEach(atk => {
+    const pair = document.createElement("div");
+    pair.className = "table-pair";
+
+    const atkCard = makeCardFace(atk, false);
+    const isDefending = state.is_defender && state.phase === "defending";
+    if (isDefending && !defenses[atk]) {
+      atkCard.classList.add("table-target");
+      if (atk === targetedAtk) atkCard.classList.add("targeted");
+      atkCard.onclick = () => onTableCardClick(atk);
+    }
+    pair.appendChild(atkCard);
+
+    const dfn = defenses[atk];
+    if (dfn) {
+      pair.appendChild(makeCardFace(dfn, false));
+    } else {
+      const slot = document.createElement("div");
+      slot.className = "card defense-slot";
+      slot.innerHTML = '<div style="text-align:center;color:#666;margin-top:30px;font-size:20px">?</div>';
+      pair.appendChild(slot);
+    }
+
+    el.appendChild(pair);
+  });
+
+  if (attacks.length === 0) {
+    el.innerHTML = '<div style="color:rgba(255,255,255,0.3);font-size:14px">Empty table</div>';
+  }
+}
+
+function renderMyHand() {
+  document.getElementById("my-label").textContent =
+    `Your hand — ${state.your_name}  (${state.your_hand.length} cards)`;
+  const el = document.getElementById("my-cards");
+  el.innerHTML = "";
+
+  // Use custom order
+  const ordered = handOrder.filter(c => state.your_hand.includes(c));
+
+  ordered.forEach((cardStr, idx) => {
+    const card = makeCardFace(cardStr, true);
+
+    // Highlight valid moves
+    const isValidAtk = state.valid_attacks.includes(cardStr);
+    const isValidTrans = state.valid_transfers.includes(cardStr);
+    let isValidDef = false;
+    if (targetedAtk && state.valid_defenses[targetedAtk]) {
+      isValidDef = state.valid_defenses[targetedAtk].includes(cardStr);
+    } else {
+      isValidDef = Object.values(state.valid_defenses).some(arr => arr.includes(cardStr));
+    }
+
+    if (isValidAtk || isValidDef || isValidTrans) card.classList.add("valid");
+    if (cardStr === selectedCard) card.classList.add("selected");
+
+    // Drag to reorder
+    card.draggable = true;
+    card.style.touchAction = "none";
+    card.addEventListener("dragstart", (e) => {
+      dragIdx = idx;
+      card.style.opacity = "0.4";
+      e.dataTransfer.effectAllowed = "move";
+    });
+    card.addEventListener("dragend", () => {
+      card.style.opacity = "1";
+      dragIdx = null;
+    });
+    card.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      card.style.borderTop = "3px solid #ffd700";
+    });
+    card.addEventListener("dragleave", () => {
+      card.style.borderTop = "";
+    });
+    card.addEventListener("drop", (e) => {
+      e.preventDefault();
+      card.style.borderTop = "";
+      if (dragIdx !== null && dragIdx !== idx) {
+        const moved = ordered.splice(dragIdx, 1)[0];
+        ordered.splice(idx, 0, moved);
+        handOrder = [...ordered];
+        render();
+      }
+    });
+
+    // Touch drag support for mobile
+    let touchStartIdx = null;
+    card.addEventListener("touchstart", (e) => {
+      touchStartIdx = idx;
+    }, {passive: true});
+    card.addEventListener("touchend", (e) => {
+      touchStartIdx = null;
+    }, {passive: true});
+
+    // Long press to enter swap mode (mobile), normal tap to play
+    let longPressTimer = null;
+    let isLongPress = false;
+
+    card.addEventListener("touchstart", (e) => {
+      isLongPress = false;
+      longPressTimer = setTimeout(() => {
+        isLongPress = true;
+        if (swapIdx === null) {
+          swapIdx = idx;
+          card.classList.add("swapping");
+          setHint("Tap another card to swap positions");
+        }
+      }, 400);
+    }, {passive: true});
+
+    card.addEventListener("touchend", (e) => {
+      clearTimeout(longPressTimer);
+      if (isLongPress) {
+        isLongPress = false;
+        return;  // already handled by long press
+      }
+      // Normal tap — if swap mode, do the swap
+      if (swapIdx !== null) {
+        if (swapIdx === -1 || swapIdx === idx) {
+          // First card selected (or same card tapped again to deselect)
+          swapIdx = (swapIdx === idx) ? null : idx;
+          render();
+          if (swapIdx !== null) setHint("Now tap the card to swap with");
+          return;
+        }
+        // Second card — do the swap
+        const temp = handOrder[swapIdx];
+        handOrder[swapIdx] = handOrder[idx];
+        handOrder[idx] = temp;
+        swapIdx = null;
+        render();
+        return;
+      }
+    }, {passive: true});
+
+    // Mark card being swapped
+    if (swapIdx === idx) card.classList.add("swapping");
+
+    card.onclick = (e) => {
+      // On desktop, if swap mode active (from right-click or sort), handle swap
+      if (swapIdx !== null) {
+        if (swapIdx === -1 || swapIdx === idx) {
+          swapIdx = (swapIdx === idx) ? null : idx;
+          render();
+          if (swapIdx !== null) setHint("Click another card to swap with");
+          return;
+        }
+        const temp = handOrder[swapIdx];
+        handOrder[swapIdx] = handOrder[idx];
+        handOrder[idx] = temp;
+        swapIdx = null;
+        render();
+        return;
+      }
+      onHandCardClick(cardStr);
+    };
+
+    // Right-click to enter swap mode on desktop
+    card.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      if (swapIdx === null) {
+        swapIdx = idx;
+        render();
+        setHint("Click another card to swap positions");
+      } else {
+        swapIdx = null;
+        render();
+      }
+    });
+
+    el.appendChild(card);
+  });
+}
+
+function renderActionBar() {
+  const el = document.getElementById("action-bar");
+  el.innerHTML = "";
+
+  if (!state) return;
+  const phase = state.phase;
+
+  // Pick up (defender)
+  if (phase === "defending" && state.is_defender) {
+    addBtn(el, "Pick Up", "danger", () => send({ action: "pickup" }));
+  }
+
+  // Transfer (defender with matching rank)
+  if (phase === "defending" && state.is_defender && state.can_transfer) {
+    addBtn(el, `Transfer to ${state.transfer_target}`, "transfer", onTransfer);
+  }
+
+  // End attack (attacker in pile_on)
+  if (phase === "pile_on" && state.is_attacker) {
+    addBtn(el, "End Attack", "", () => send({ action: "end_attack" }));
+  }
+}
+
+function addBtn(parent, label, cls, fn) {
+  const b = document.createElement("button");
+  b.className = "btn " + cls;
+  b.textContent = label;
+  b.onclick = fn;
+  parent.appendChild(b);
+}
+
+function renderHint() {
+  if (!state) return;
+  const phase = state.phase;
+  let hint = "";
+
+  if (phase === "attacking" && state.is_attacker)
+    hint = "Your turn to attack — tap a card to play it";
+  else if (phase === "attacking" && !state.is_attacker)
+    hint = `Waiting for ${state.attacker} to attack...`;
+  else if (phase === "defending" && state.is_defender) {
+    if (targetedAtk)
+      hint = `Now pick a card from your hand to beat  ${targetedAtk}`;
+    else
+      hint = "Tap an attack card on the table, then pick your defense card";
+  }
+  else if (phase === "defending" && !state.is_defender)
+    hint = `Waiting for ${state.defender} to defend...`;
+  else if (phase === "pile_on" && state.is_attacker)
+    hint = "Tap a card to pile on, or press End Attack";
+  else if (phase === "pile_on" && !state.is_attacker)
+    hint = `Waiting for ${state.attacker}...`;
+
+  if (hint) setHint(hint);
+}
+
+// ---------------------------------------------------------------------------
+// Interactions
+// ---------------------------------------------------------------------------
+function onHandCardClick(cardStr) {
+  if (!state) return;
+  const phase = state.phase;
+
+  // Attacking or pile-on
+  if ((phase === "attacking" && state.is_attacker) ||
+      (phase === "pile_on"   && state.is_attacker)) {
+    if (!state.valid_attacks.includes(cardStr)) {
+      showError("Can't play that card right now");
+      return;
+    }
+    send({ action: "attack", card: cardStr });
+    return;
+  }
+
+  // Defending — select card first
+  if (phase === "defending" && state.is_defender) {
+    if (selectedCard === cardStr) {
+      selectedCard = null;        // deselect
+    } else {
+      selectedCard = cardStr;
+    }
+
+    // If we already have a table target, try to defend immediately
+    if (targetedAtk && selectedCard) {
+      send({ action: "defend", attack_card: targetedAtk, defense_card: selectedCard });
+      selectedCard = null;
+      targetedAtk = null;
+    } else {
+      render();
+    }
+  }
+}
+
+function onTableCardClick(atkCard) {
+  if (!state || state.phase !== "defending" || !state.is_defender) return;
+
+  if (selectedCard) {
+    // Hand card already selected — defend immediately
+    send({ action: "defend", attack_card: atkCard, defense_card: selectedCard });
+    selectedCard = null;
+    targetedAtk = null;
+  } else {
+    // No hand card yet — set target and wait
+    targetedAtk = atkCard;
+    render();
+  }
+}
+
+const SUIT_ORDER = {"\u2663": 0, "\u2666": 1, "\u2665": 2, "\u2660": 3};
+const RANK_ORDER = {"6":6,"7":7,"8":8,"9":9,"10":10,"J":11,"Q":12,"K":13,"A":14};
+
+function sortHand(mode) {
+  if (!state) return;
+  const trumpSuit = state.trump;
+  if (mode === "suit") {
+    handOrder.sort((a, b) => {
+      const sa = suitOf(a), sb = suitOf(b);
+      const ta = sa === trumpSuit ? 99 : (SUIT_ORDER[sa] || 0);
+      const tb = sb === trumpSuit ? 99 : (SUIT_ORDER[sb] || 0);
+      if (ta !== tb) return ta - tb;
+      return (RANK_ORDER[rankOf(a)] || 0) - (RANK_ORDER[rankOf(b)] || 0);
+    });
+  } else {
+    handOrder.sort((a, b) => {
+      const ra = RANK_ORDER[rankOf(a)] || 0;
+      const rb = RANK_ORDER[rankOf(b)] || 0;
+      if (ra !== rb) return ra - rb;
+      const sa = suitOf(a) === trumpSuit ? 99 : (SUIT_ORDER[suitOf(a)] || 0);
+      const sb = suitOf(b) === trumpSuit ? 99 : (SUIT_ORDER[suitOf(b)] || 0);
+      return sa - sb;
+    });
+  }
+  render();
+}
+
+function onTransfer() {
+  if (!selectedCard) {
+    showError("Select a same-rank card from your hand first, then press Transfer");
+    return;
+  }
+  send({ action: "transfer", cards: [selectedCard] });
+  selectedCard = null;
+}
+
+// ---------------------------------------------------------------------------
+// Game over
+// ---------------------------------------------------------------------------
+function showGameOver(s) {
+  const overlay = document.getElementById("gameover-overlay");
+  overlay.style.display = "flex";
+  document.getElementById("go-title").textContent =
+    s.durak ? `${s.durak} is the DURAK!` : "Game Over!";
+  const body = document.getElementById("go-body");
+  body.innerHTML = "";
+  s.winners.forEach(w => {
+    const p = document.createElement("p");
+    p.className = "winner";
+    p.textContent = `${w} escaped!`;
+    body.appendChild(p);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Card rendering helpers
+// ---------------------------------------------------------------------------
+const RED_SUITS = new Set(["♥", "♦"]);
+
+function suitOf(cardStr) {
+  // Last char is suit symbol
+  return cardStr.slice(-1);
+}
+function rankOf(cardStr) {
+  return cardStr.slice(0, -1);
+}
+
+function makeCardFace(cardStr, isMine) {
+  const suit = suitOf(cardStr);
+  const rank = rankOf(cardStr);
+  const isRed = RED_SUITS.has(suit);
+  const isTrump = state && suit === state.trump;
+
+  const el = document.createElement("div");
+  el.className = "card face-up" + (isRed ? " red" : "") + (isTrump ? " trump-card" : "");
+  el.innerHTML = `
+    <div>
+      <div class="card-rank">${rank}</div>
+      <div class="card-suit">${suit}</div>
+    </div>
+    <div class="card-center">${suit}</div>
+    <div class="card-rank-bot">${rank}</div>
+  `;
+  return el;
+}
+
+function makeCardBack() {
+  const el = document.createElement("div");
+  el.className = "card face-down";
+  return el;
+}
+
+// ---------------------------------------------------------------------------
+// UI helpers
+// ---------------------------------------------------------------------------
+function setHint(msg, isError=false) {
+  const el = document.getElementById("hint");
+  el.textContent = msg;
+  el.className = isError ? "error" : "";
+}
+
+function setSubInfo(msg) {
+  document.getElementById("subinfo").textContent = msg;
+}
+
+function showError(msg) {
+  setHint(msg, true);
+  clearTimeout(errorTimeout);
+  errorTimeout = setTimeout(() => { if (state) renderHint(); }, 3000);
+}
+
+// ---------------------------------------------------------------------------
+// Connection status display
+// ---------------------------------------------------------------------------
+function updateStatusDot() {
+  const el = document.getElementById("conn-status");
+  if (!el) return;
+  const colors = {
+    connected: "#44ff88",
+    connecting: "#ffd700",
+    reconnecting: "#ff9944",
+    disconnected: "#ff4444"
+  };
+  const dot = colors[connectionStatus] || "#888";
+  const pingText = pingMs > 0 && connectionStatus === "connected" ? ` ${pingMs}ms` : "";
+  el.innerHTML = `<span style="color:${dot}">&#9679;</span> ${connectionStatus}${pingText}`;
+}
+
+// Auto-refresh status dot every 5s
+setInterval(updateStatusDot, 5000);
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("room-url").textContent = location.href;
+  // Auto-fill name from previous session
+  try {
+    const saved = sessionStorage.getItem("durak_name");
+    if (saved) document.getElementById("name-input").value = saved;
+  } catch(e) {}
+  document.getElementById("room-name-display").textContent = ROOM_ID;
+  document.getElementById("wait-url").textContent = location.href;
+  document.getElementById("name-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") joinGame();
+  });
+});
+</script>
+</body>
+</html>
