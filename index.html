@@ -398,7 +398,11 @@
 <div id="gameover-overlay">
   <h1 id="go-title"></h1>
   <div id="go-body"></div>
-  <button class="btn" onclick="location.reload()">Play Again</button>
+  <div id="rematch-status" style="color:#aaa;font-size:16px"></div>
+  <div style="display:flex;gap:12px;margin-top:10px">
+    <button class="btn" id="rematch-btn" onclick="requestRematch()" style="background:rgba(30,100,60,0.9);border-color:#44ff88;font-size:18px;padding:12px 28px">Rematch</button>
+    <button class="btn" onclick="location.reload()" style="font-size:14px;padding:10px 20px">New Room</button>
+  </div>
 </div>
 
 <style>
@@ -578,16 +582,32 @@ function handleMessage(msg) {
     setHint(msg.message, true);
     return;
   }
+  if (msg.type === "rematch_waiting") {
+    const el = document.getElementById("rematch-status");
+    if (el) el.textContent = msg.message;
+    const btn = document.getElementById("rematch-btn");
+    if (btn) { btn.textContent = "Waiting..."; btn.disabled = true; }
+    return;
+  }
   if (msg.type === "state") {
     state = msg;
     selectedCard = null;
     targetedAtk = null;
+    // Hide game over overlay if a new game started (rematch)
+    if (!msg.durak) {
+      document.getElementById("gameover-overlay").style.display = "none";
+    }
     // Preserve custom hand order: keep existing cards in order, append new ones
-    if (handOrder.length > 0) {
+    if (handOrder.length > 0 && !msg.durak) {
       const newHand = state.your_hand;
       const kept = handOrder.filter(c => newHand.includes(c));
       const added = newHand.filter(c => !kept.includes(c));
-      handOrder = [...kept, ...added];
+      // If most cards changed (new game/rematch), reset order
+      if (kept.length < newHand.length / 2) {
+        handOrder = [...state.your_hand];
+      } else {
+        handOrder = [...kept, ...added];
+      }
     } else {
       handOrder = [...state.your_hand];
     }
@@ -1014,7 +1034,21 @@ function showGameOver(s) {
     p.textContent = `${w} escaped!`;
     body.appendChild(p);
   });
+  // Reset rematch button
+  const btn = document.getElementById("rematch-btn");
+  if (btn) { btn.textContent = "Rematch"; btn.disabled = false; }
+  const status = document.getElementById("rematch-status");
+  if (status) status.textContent = "";
 }
+
+function requestRematch() {
+  send({ action: "rematch" });
+  const btn = document.getElementById("rematch-btn");
+  if (btn) { btn.textContent = "Waiting for opponent..."; btn.disabled = true; }
+}
+
+// When a rematch starts, hide the overlay
+const origHandleState = null; // handled inline below
 
 // ---------------------------------------------------------------------------
 // Card rendering helpers

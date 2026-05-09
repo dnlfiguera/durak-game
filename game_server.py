@@ -93,6 +93,39 @@ class GameRoom:
         names = [p.name for p in self.players]
         self.gs = GameState(names)
         self.started = True
+        self.rematch_votes: set[int] = set()
+        self.game_over_time = None
+
+    def reset_for_rematch(self):
+        """Start a new game with the same players."""
+        names = [p.name for p in self.players]
+        self.gs = GameState(names)
+        self.rematch_votes = set()
+        self.game_over_time = None
+        print(f"[Room {self.room_id}] Rematch started: {names}")
+
+    def vote_rematch(self, pc_index: int) -> bool:
+        """Player votes for rematch. Returns True if all voted yes."""
+        self.rematch_votes.add(pc_index)
+        connected_count = sum(1 for p in self.players if p.connected)
+        return len(self.rematch_votes) >= connected_count
+
+    def mark_game_over(self):
+        """Called when game ends — start the cleanup timer."""
+        self.game_over_time = asyncio.get_event_loop().time()
+
+    def is_stale(self) -> bool:
+        """Room is stale if:
+        - No one is connected, OR
+        - Game ended 5+ minutes ago with no rematch
+        """
+        if not any(p.connected for p in self.players):
+            return True
+        if self.game_over_time is not None:
+            elapsed = asyncio.get_event_loop().time() - self.game_over_time
+            if elapsed > 300:  # 5 minutes after game over
+                return True
+        return False
 
     def get_player_by_ws(self, ws: WebSocket) -> Optional[PlayerConnection]:
         for p in self.players:
@@ -203,6 +236,9 @@ class GameRoom:
     # ------------------------------------------------------------------
 
     async def broadcast_state(self, log_msg: str = ""):
+        # Track when game ends for room cleanup
+        if self.gs and self.gs.phase == GamePhase.GAME_OVER and self.game_over_time is None:
+            self.mark_game_over()
         for pc in self.players:
             state = self.state_for(pc)
             state["type"] = "state"
@@ -392,8 +428,26 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 continue
 
             if room.gs.phase == GamePhase.GAME_OVER:
-                await pc.send({"type": "error",
-                               "message": "Game is already over."})
+                # Only allow rematch action when game is over
+                if data.get("action") == "rematch":
+                    all_voted = room.vote_rematch(pc.index)
+                    if all_voted:
+                        room.reset_for_rematch()
+                        await room.broadcast({"type": "start",
+                                               "message": "Rematch! New game starting..."})
+                        await room.broadcast_state("Rematch started!")
+                    else:
+                        voted = len(room.rematch_votes)
+                        needed = sum(1 for p in room.players if p.connected)
+                        await room.broadcast({
+                            "type": "rematch_waiting",
+                            "voted": voted,
+                            "needed": needed,
+                            "message": f"{pc.name} wants a rematch! ({voted}/{needed})"
+                        })
+                else:
+                    await pc.send({"type": "error",
+                                   "message": "Game is over. Press Rematch to play again."})
                 continue
 
             await room.handle_action(pc, data)
@@ -475,6 +529,17 @@ async def startup():
     print(f"")
     print(f"  Both open the same link, enter names, and play!")
     print("="*52 + "\n")
+
+    # Periodic room cleanup
+    async def cleanup_rooms():
+        while True:
+            await asyncio.sleep(120)  # check every 2 minutes
+            stale = [rid for rid, room in rooms.items() if room.is_stale()]
+            for rid in stale:
+                print(f"[Cleanup] Removing stale room: {rid}")
+                del rooms[rid]
+
+    asyncio.create_task(cleanup_rooms())
 
 
 # ---------------------------------------------------------------------------
