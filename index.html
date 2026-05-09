@@ -427,7 +427,6 @@ let dragIdx = null;         // index being dragged
 let lastPingTime = 0;       // when we received last ping
 let pingMs = 0;             // round-trip estimate
 let connectionStatus = "connecting";  // connecting, connected, reconnecting, disconnected
-let swapIdx = null;          // first card tapped for swap (mobile)
 
 // ---------------------------------------------------------------------------
 // WebSocket connection
@@ -448,13 +447,27 @@ function joinGame() {
 
 function connectWS() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  ws = new WebSocket(`${proto}//${location.host}/ws/${ROOM_ID}`);
+  const wsUrl = `${proto}//${location.host}/ws/${ROOM_ID}`;
+  console.log("Connecting to:", wsUrl);
+  
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch(e) {
+    console.error("WebSocket creation failed:", e);
+    connectionStatus = "disconnected";
+    updateStatusDot();
+    setHint("WebSocket not supported - try Chrome or Firefox", true);
+    return;
+  }
 
   ws.onopen = () => {
+    console.log("WebSocket connected");
     reconnectAttempts = 0;
     connectionStatus = "connected";
     updateStatusDot();
     ws.send(JSON.stringify({ name: myName }));
+    // Request lobby refresh after a short delay (helps mobile)
+    setTimeout(() => { if (!wasConnected) send({ type: "pong" }); }, 1000);
   };
 
   ws.onmessage = (evt) => {
@@ -485,7 +498,9 @@ function connectWS() {
     }
   };
 
-  ws.onerror = () => {};  // onclose handles it
+  ws.onerror = (e) => {
+    console.error("WebSocket error:", e);
+  };
 }
 
 function scheduleReconnect() {
@@ -523,9 +538,10 @@ function handleMessage(msg) {
     return;
   }
   if (msg.type === "lobby_update") {
+    console.log("lobby_update received:", msg);
     document.getElementById("waiting").style.display = "flex";
     document.getElementById("lobby-players").innerHTML =
-      msg.players.map((n,i) => `<div>${i===0 ? "&#9733; " : ""}${n}${i===0 ? " (host)" : ""}</div>`).join("");
+      msg.players.map((n,i) => `<div style="color:${i===0?'#ff9944':'#44ccff'};margin:4px">${i===0 ? "&#9733; " : ""}${n}${i===0 ? " (host)" : ""}</div>`).join("");
     document.getElementById("lobby-status").textContent = msg.message;
     const startBtn = document.getElementById("start-btn");
     if (msg.is_host && msg.count >= 2) {
@@ -533,26 +549,7 @@ function handleMessage(msg) {
       startBtn.textContent = `Start Game (${msg.count} players)`;
     } else if (!msg.is_host) {
       startBtn.style.display = "none";
-      document.getElementById("lobby-status").textContent += " — waiting for host to start";
-    } else {
-      startBtn.style.display = "none";
-    }
-    return;
-  }
-  if (msg.type === "lobby_update") {
-    document.getElementById("waiting").style.display = "flex";
-    const playersEl = document.getElementById("lobby-players");
-    playersEl.innerHTML = msg.players.map((name, i) => 
-      `<div style="color:${i===0?'#ff9944':'#44ccff'};margin:4px">${i===0?'(host) ':''}${name}</div>`
-    ).join("");
-    document.getElementById("lobby-status").textContent = 
-      `${msg.count} player${msg.count>1?'s':''} joined (2-4 needed)`;
-    // Only host (index 0) sees start button, and only with 2+ players
-    const isHost = msg.players[0] === myName;
-    const startBtn = document.getElementById("start-btn");
-    if (isHost && msg.can_start) {
-      startBtn.style.display = "block";
-      startBtn.textContent = `Start Game (${msg.count} players)`;
+      document.getElementById("lobby-status").textContent += " - waiting for host to start";
     } else {
       startBtn.style.display = "none";
     }
@@ -775,90 +772,74 @@ function renderMyHand() {
       }
     });
 
-    // Touch drag support for mobile
-    let touchStartIdx = null;
-    card.addEventListener("touchstart", (e) => {
-      touchStartIdx = idx;
-    }, {passive: true});
-    card.addEventListener("touchend", (e) => {
-      touchStartIdx = null;
-    }, {passive: true});
-
-    // Long press to enter swap mode (mobile), normal tap to play
-    let longPressTimer = null;
-    let isLongPress = false;
+    // --- Touch: long-press to drag-reorder, tap to play ---
+    let lpTimer = null;
+    let isDragging = false;
 
     card.addEventListener("touchstart", (e) => {
-      isLongPress = false;
-      longPressTimer = setTimeout(() => {
-        isLongPress = true;
-        if (swapIdx === null) {
-          swapIdx = idx;
-          card.classList.add("swapping");
-          setHint("Tap another card to swap positions");
-        }
-      }, 400);
+      isDragging = false;
+      lpTimer = setTimeout(() => {
+        isDragging = true;
+        card.style.opacity = "0.5";
+        card.style.transform = "scale(1.15)";
+        card.style.zIndex = "100";
+        if (navigator.vibrate) navigator.vibrate(30);
+      }, 300);
     }, {passive: true});
 
-    card.addEventListener("touchend", (e) => {
-      clearTimeout(longPressTimer);
-      if (isLongPress) {
-        isLongPress = false;
-        return;  // already handled by long press
+    card.addEventListener("touchmove", (e) => {
+      if (!isDragging) {
+        // Cancel long press if finger moves before it triggers
+        clearTimeout(lpTimer);
+        return;
       }
-      // Normal tap — if swap mode, do the swap
-      if (swapIdx !== null) {
-        if (swapIdx === -1 || swapIdx === idx) {
-          // First card selected (or same card tapped again to deselect)
-          swapIdx = (swapIdx === idx) ? null : idx;
-          render();
-          if (swapIdx !== null) setHint("Now tap the card to swap with");
-          return;
+      e.preventDefault();
+      // Highlight card under finger
+      const touch = e.touches[0];
+      const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+      document.querySelectorAll("#my-cards .card").forEach(c => c.style.borderLeft = "");
+      if (elUnder) {
+        const cardUnder = elUnder.closest(".card.face-up");
+        if (cardUnder && cardUnder !== card && cardUnder.parentElement === el) {
+          cardUnder.style.borderLeft = "3px solid #ffd700";
         }
-        // Second card — do the swap
-        const temp = handOrder[swapIdx];
-        handOrder[swapIdx] = handOrder[idx];
-        handOrder[idx] = temp;
-        swapIdx = null;
+      }
+    }, {passive: false});
+
+    card.addEventListener("touchend", (e) => {
+      clearTimeout(lpTimer);
+      if (isDragging) {
+        // Find drop target and reorder
+        const touch = e.changedTouches[0];
+        const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+        if (elUnder) {
+          const cardUnder = elUnder.closest(".card.face-up");
+          if (cardUnder && cardUnder !== card && cardUnder.parentElement === el) {
+            const cards = Array.from(el.children);
+            const targetIdx = cards.indexOf(cardUnder);
+            if (targetIdx >= 0 && idx !== targetIdx) {
+              const moved = handOrder.splice(idx, 1)[0];
+              handOrder.splice(targetIdx, 0, moved);
+            }
+          }
+        }
+        document.querySelectorAll("#my-cards .card").forEach(c => c.style.borderLeft = "");
+        card.style.opacity = "1";
+        card.style.transform = "";
+        card.style.zIndex = "";
+        isDragging = false;
         render();
         return;
       }
+      // Normal tap = play the card
+      onHandCardClick(cardStr);
     }, {passive: true});
 
-    // Mark card being swapped
-    if (swapIdx === idx) card.classList.add("swapping");
-
+    // --- PC: drag to reorder, click to play ---
     card.onclick = (e) => {
-      // On desktop, if swap mode active (from right-click or sort), handle swap
-      if (swapIdx !== null) {
-        if (swapIdx === -1 || swapIdx === idx) {
-          swapIdx = (swapIdx === idx) ? null : idx;
-          render();
-          if (swapIdx !== null) setHint("Click another card to swap with");
-          return;
-        }
-        const temp = handOrder[swapIdx];
-        handOrder[swapIdx] = handOrder[idx];
-        handOrder[idx] = temp;
-        swapIdx = null;
-        render();
-        return;
-      }
+      if ("ontouchstart" in window) return;
       onHandCardClick(cardStr);
     };
-
-    // Right-click to enter swap mode on desktop
-    card.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      if (swapIdx === null) {
-        swapIdx = idx;
-        render();
-        setHint("Click another card to swap positions");
-      } else {
-        swapIdx = null;
-        render();
-      }
-    });
 
     el.appendChild(card);
   });
@@ -881,9 +862,14 @@ function renderActionBar() {
     addBtn(el, `Transfer to ${state.transfer_target}`, "transfer", onTransfer);
   }
 
-  // End attack (attacker in pile_on)
+  // End attack (any non-defender can end during pile_on, but only main attacker's button)
   if (phase === "pile_on" && state.is_attacker) {
     addBtn(el, "End Attack", "", () => send({ action: "end_attack" }));
+  }
+
+  // Pile on hint for non-attacker helpers (3+ players)
+  if (phase === "pile_on" && !state.is_attacker && !state.is_defender && state.valid_attacks.length > 0) {
+    addBtn(el, "Pass (no pile on)", "", () => send({ action: "end_attack" }));
   }
 }
 
@@ -911,9 +897,13 @@ function renderHint() {
       hint = "Tap an attack card on the table, then pick your defense card";
   }
   else if (phase === "defending" && !state.is_defender)
-    hint = `Waiting for ${state.defender} to defend...`;
+    hint = state.valid_attacks.length > 0 
+      ? `Waiting for ${state.defender} to defend... (you can pile on after)`
+      : `Waiting for ${state.defender} to defend...`;
   else if (phase === "pile_on" && state.is_attacker)
     hint = "Tap a card to pile on, or press End Attack";
+  else if (phase === "pile_on" && !state.is_defender && state.valid_attacks.length > 0)
+    hint = "You can pile on matching cards too!";
   else if (phase === "pile_on" && !state.is_attacker)
     hint = `Waiting for ${state.attacker}...`;
 
@@ -927,9 +917,9 @@ function onHandCardClick(cardStr) {
   if (!state) return;
   const phase = state.phase;
 
-  // Attacking or pile-on
+  // Attacking or pile-on (any non-defender can pile on)
   if ((phase === "attacking" && state.is_attacker) ||
-      (phase === "pile_on"   && state.is_attacker)) {
+      (phase === "pile_on"   && !state.is_defender)) {
     if (!state.valid_attacks.includes(cardStr)) {
       showError("Can't play that card right now");
       return;

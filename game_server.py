@@ -51,7 +51,8 @@ class PlayerConnection:
             return
         try:
             await self.ws.send_text(json.dumps(msg))
-        except Exception:
+        except Exception as e:
+            print(f"[Send Error] {self.name}: {e}")
             self.connected = False
 
 
@@ -101,6 +102,22 @@ class GameRoom:
 
     def all_connected(self) -> bool:
         return all(p.connected for p in self.players)
+
+    async def broadcast_lobby(self):
+        """Send lobby state to all connected players."""
+        player_names = [p.name for p in self.players]
+        count = len(self.players)
+        print(f"[Lobby] Broadcasting to {count} players: {player_names}")
+        for p in self.players:
+            print(f"[Lobby] Sending to {p.name} (connected={p.connected})")
+            await p.send({
+                "type": "lobby_update",
+                "players": player_names,
+                "count": count,
+                "max": self.max_players,
+                "is_host": p.index == 0,
+                "message": f"{count}/{self.max_players} players joined: {', '.join(player_names)}"
+            })
 
     # ------------------------------------------------------------------
     # State snapshots sent to each player
@@ -323,18 +340,11 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         await pc.send({"type": "joined", "player_index": pc.index,
                        "your_name": name, "room_id": room_id})
 
+        # Small delay to let mobile WebSockets settle
+        await asyncio.sleep(0.3)
+
         # Notify everyone about the lobby
-        player_names = [p.name for p in room.players]
-        count = len(room.players)
-        for p in room.players:
-            await p.send({
-                "type": "lobby_update",
-                "players": player_names,
-                "count": count,
-                "max": room.max_players,
-                "is_host": p.index == 0,
-                "message": f"{count}/{room.max_players} players joined: {', '.join(player_names)}"
-            })
+        await room.broadcast_lobby()
 
     # --- Heartbeat task (keeps connection alive) ---
     async def heartbeat():
@@ -356,6 +366,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
             # Handle pong from client
             if data.get("type") == "pong":
+                # If game hasn't started, re-send lobby state (fixes mobile timing)
+                if not room.started and len(room.players) > 1:
+                    await room.broadcast_lobby()
                 continue
 
             # Host can start the game when 2+ players are in
