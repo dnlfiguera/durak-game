@@ -476,14 +476,16 @@ class GameState:
         self.defender_index = (self.attacker_index + 1) % len(self.players)
 
     def _refill_hands(self):
-        """Refill in order: attacker, then clockwise, defender last."""
+        """Refill in order: attacker first, then clockwise, defender last."""
         order = []
+        visited = set()
         i = self.attacker_index
-        while len(order) < len(self.players):
-            if i != self.defender_index:
+        while len(order) < len(self.players) - 1:
+            if i != self.defender_index and i not in visited:
                 order.append(i)
+                visited.add(i)
             i = (i + 1) % len(self.players)
-        order.append(self.defender_index)
+        order.append(self.defender_index)  # defender always last
         for idx in order:
             self.players[idx].draw_up_to(self.deck)
 
