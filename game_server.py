@@ -95,6 +95,7 @@ class GameRoom:
         self.started = True
         self.rematch_votes: set[int] = set()
         self.game_over_time = None
+        self.undo_pending: Optional[int] = None  # player index requesting undo
 
     def reset_for_rematch(self):
         """Start a new game with the same players."""
@@ -102,6 +103,7 @@ class GameRoom:
         self.gs = GameState(names)
         self.rematch_votes = set()
         self.game_over_time = None
+        self.undo_pending = None
         print(f"[Room {self.room_id}] Rematch started: {names}")
 
     def vote_rematch(self, pc_index: int) -> bool:
@@ -456,6 +458,49 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 else:
                     await pc.send({"type": "error",
                                    "message": "Game is over. Press Rematch to play again."})
+                continue
+
+            # ── Undo request system ──
+            if data.get("action") == "undo_request":
+                if room.gs.last_action is None:
+                    await pc.send({"type": "error", "message": "Nothing to undo."})
+                    continue
+                if room.gs.last_action["player"] != room.gs.players[pc.index]:
+                    await pc.send({"type": "error", "message": "You can only undo your own move."})
+                    continue
+                room.undo_pending = pc.index
+                # Ask all opponents to approve
+                for other in room.players:
+                    if other.index != pc.index and other.connected:
+                        await other.send({
+                            "type": "undo_request",
+                            "from": pc.name,
+                            "message": f"{pc.name} wants to undo their last move. Allow?"
+                        })
+                await pc.send({"type": "undo_sent",
+                               "message": "Undo request sent — waiting for opponent..."})
+                continue
+
+            if data.get("action") == "undo_approve":
+                if room.undo_pending is None:
+                    continue
+                result = room.gs.undo_last_action()
+                if result["ok"]:
+                    room.undo_pending = None
+                    log = room.gs.log[-1] if room.gs.log else ""
+                    await room.broadcast_state(log)
+                    await room.broadcast({"type": "undo_done",
+                                          "message": "Undo approved — move reversed!"})
+                else:
+                    await pc.send({"type": "error", "message": result["error"]})
+                continue
+
+            if data.get("action") == "undo_deny":
+                if room.undo_pending is not None:
+                    requester = room.players[room.undo_pending]
+                    await requester.send({"type": "undo_denied",
+                                          "message": f"{pc.name} denied the undo request."})
+                    room.undo_pending = None
                 continue
 
             await room.handle_action(pc, data)

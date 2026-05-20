@@ -220,6 +220,7 @@ class GameState:
         self.durak: Optional[Player] = None        # set at game end
         self.winners: list[Player] = []            # players who finished
         self.log: list[str] = []                   # human-readable event log
+        self.last_action: Optional[dict] = None    # for undo support
 
         self._deal_initial_hands()
         attacker_index = self._find_first_attacker()
@@ -295,14 +296,23 @@ class GameState:
             # Pile-on: rank must already be on the table
             if card.rank not in self.table.valid_pile_on_ranks():
                 return self._err(f"Rank {card.rank_name} is not on the table; cannot pile on.")
-            # Cannot pile on more cards than the defender has in hand
-            if len(self.table.undefended()) >= len(self.defender.hand):
-                return self._err("Cannot pile on: defender has no room.")
+
+        # Total undefended cards after this play cannot exceed defender's hand size
+        new_undefended = len(self.table.undefended()) + 1
+        if new_undefended > len(self.defender.hand):
+            return self._err(
+                f"Cannot attack: {self.defender.name} only has {len(self.defender.hand)} card(s)."
+            )
 
         player.remove_card(card)
         self.table.add_attack(card)
+        old_phase = self.phase
         self.phase = GamePhase.DEFENDING
         self._log(f"{player.name} attacks with {card}")
+        self.last_action = {
+            "type": "attack", "player": player, "cards": [card],
+            "old_phase": old_phase,
+        }
         return self._ok()
 
     def multi_attack(self, player: Player, cards: list[Card]) -> dict:
@@ -324,10 +334,12 @@ class GameState:
                 return self._err(f"{player.name} does not have {c}.")
 
         # Check total wouldn't exceed defender's hand size
-        if not self.table.is_empty():
-            new_undefended = len(self.table.undefended()) + len(cards)
-            if new_undefended > len(self.defender.hand):
-                return self._err("Cannot play that many cards: defender doesn't have enough cards.")
+        new_undefended = len(self.table.undefended()) + len(cards)
+        if new_undefended > len(self.defender.hand):
+            return self._err(
+                f"Cannot attack with {len(cards)} cards: "
+                f"{self.defender.name} only has {len(self.defender.hand)} card(s)."
+            )
 
         # Validate each card individually (reuse attack logic)
         for c in cards:
@@ -346,6 +358,7 @@ class GameState:
             return self._err("The defender cannot attack.")
 
         # All checks passed — play all cards
+        old_phase = self.phase
         for c in cards:
             player.remove_card(c)
             self.table.add_attack(c)
@@ -353,6 +366,10 @@ class GameState:
         self.phase = GamePhase.DEFENDING
         card_strs = ", ".join(str(c) for c in cards)
         self._log(f"{player.name} attacks with {len(cards)} cards: {card_strs}")
+        self.last_action = {
+            "type": "multi_attack", "player": player, "cards": list(cards),
+            "old_phase": old_phase,
+        }
         return self._ok()
 
     def defend(self, player: Player, attack_card: Card, defense_card: Card) -> dict:
@@ -372,11 +389,54 @@ class GameState:
         self.table.add_defense(attack_card, defense_card)
         self._log(f"{player.name} defends {attack_card} with {defense_card}")
 
+        old_phase = self.phase
         if self.table.all_defended():
             self.phase = GamePhase.PILE_ON
             self._log("All attacks defended. Attackers may pile on or end the attack.")
 
+        self.last_action = {
+            "type": "defend", "player": player,
+            "attack_card": attack_card, "defense_card": defense_card,
+            "old_phase": old_phase,
+        }
         return self._ok()
+
+    def undo_last_action(self) -> dict:
+        """
+        Undo the last attack or defense.
+        Returns cards to the player's hand and restores the previous phase.
+        Only works for attack, multi_attack, and defend — not end_attack or pickup.
+        """
+        if self.last_action is None:
+            return self._err("Nothing to undo.")
+
+        action = self.last_action
+        self.last_action = None  # can only undo once
+
+        if action["type"] in ("attack", "multi_attack"):
+            player = action["player"]
+            cards = action["cards"]
+            for c in cards:
+                self.table.attacks.remove(c)
+                player.hand.append(c)
+            self.phase = action["old_phase"]
+            card_strs = ", ".join(str(c) for c in cards)
+            self._log(f"UNDO: {player.name} takes back {card_strs}")
+            return self._ok()
+
+        elif action["type"] == "defend":
+            player = action["player"]
+            atk = action["attack_card"]
+            dfn = action["defense_card"]
+            # Remove defense from table
+            if atk in self.table.defenses:
+                del self.table.defenses[atk]
+            player.hand.append(dfn)
+            self.phase = GamePhase.DEFENDING  # back to defending
+            self._log(f"UNDO: {player.name} takes back {dfn} (was defending {atk})")
+            return self._ok()
+
+        return self._err("Cannot undo this action.")
 
     def end_attack(self, player: Player) -> dict:
         """

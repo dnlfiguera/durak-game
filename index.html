@@ -232,6 +232,8 @@
   .btn.danger:hover { background: rgba(180,40,40,0.95); }
   .btn.transfer { background: rgba(30,100,60,0.9); border-color: #44ff88; }
   .btn.transfer:hover { background: rgba(40,140,80,0.95); }
+  .btn.undo { background: rgba(80,60,20,0.8); border-color: #cc9933; font-size: 13px; padding: 6px 14px; }
+  .btn.undo:hover { background: rgba(120,90,30,0.9); }
   .card.swapping {
     border-color: #ff44ff !important;
     box-shadow: 0 0 12px rgba(255,68,255,0.8) !important;
@@ -396,6 +398,18 @@
 
 <!-- Game over overlay -->
 <div id="gameover-overlay">
+
+<!-- Undo request popup -->
+<div id="undo-popup" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center">
+  <div style="background:#1a3a1a;border:2px solid #cc9933;border-radius:16px;padding:24px 32px;max-width:340px">
+    <p id="undo-msg" style="font-size:18px;color:#ffd060;margin-bottom:16px"></p>
+    <div style="display:flex;gap:12px;justify-content:center">
+      <button class="btn transfer" onclick="answerUndo(true)" style="padding:10px 24px">Allow</button>
+      <button class="btn danger" onclick="answerUndo(false)" style="padding:10px 24px">Deny</button>
+    </div>
+  </div>
+</div>
   <h1 id="go-title"></h1>
   <div id="go-body"></div>
   <div id="rematch-status" style="color:#aaa;font-size:16px"></div>
@@ -575,6 +589,25 @@ function handleMessage(msg) {
     return;
   }
   if (msg.type === "error") {
+    showError(msg.message);
+    return;
+  }
+  if (msg.type === "undo_request") {
+    // Show popup to opponent
+    document.getElementById("undo-msg").textContent = msg.message;
+    document.getElementById("undo-popup").style.display = "flex";
+    return;
+  }
+  if (msg.type === "undo_sent") {
+    setHint(msg.message);
+    return;
+  }
+  if (msg.type === "undo_done") {
+    document.getElementById("undo-popup").style.display = "none";
+    setHint(msg.message);
+    return;
+  }
+  if (msg.type === "undo_denied") {
     showError(msg.message);
     return;
   }
@@ -891,6 +924,11 @@ function renderActionBar() {
   if (phase === "pile_on" && !state.is_attacker && !state.is_defender && state.valid_attacks.length > 0) {
     addBtn(el, "Pass (no pile on)", "", () => send({ action: "end_attack" }));
   }
+
+  // Undo button (always available during active play)
+  if (phase !== "game_over") {
+    addBtn(el, "Undo", "undo", () => send({ action: "undo_request" }));
+  }
 }
 
 function addBtn(parent, label, cls, fn) {
@@ -1060,6 +1098,11 @@ function onTransfer() {
   }
   send({ action: "transfer", cards: [...selectedCards] });
   selectedCards.clear();
+}
+
+function answerUndo(approved) {
+  document.getElementById("undo-popup").style.display = "none";
+  send({ action: approved ? "undo_approve" : "undo_deny" });
 }
 
 // ---------------------------------------------------------------------------
