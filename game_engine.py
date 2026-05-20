@@ -305,6 +305,56 @@ class GameState:
         self._log(f"{player.name} attacks with {card}")
         return self._ok()
 
+    def multi_attack(self, player: Player, cards: list[Card]) -> dict:
+        """
+        Play multiple cards of the same rank at once.
+        Valid for opening attack or pile-on.
+        """
+        if not cards:
+            return self._err("No cards provided.")
+        if len(cards) < 2:
+            return self._err("Use regular attack for a single card.")
+
+        # All cards must be the same rank
+        rank = cards[0].rank
+        for c in cards:
+            if c.rank != rank:
+                return self._err(f"All cards must be the same rank. Got {c.rank_name} and {cards[0].rank_name}.")
+            if not player.has_card(c):
+                return self._err(f"{player.name} does not have {c}.")
+
+        # Check total wouldn't exceed defender's hand size
+        if not self.table.is_empty():
+            new_undefended = len(self.table.undefended()) + len(cards)
+            if new_undefended > len(self.defender.hand):
+                return self._err("Cannot play that many cards: defender doesn't have enough cards.")
+
+        # Validate each card individually (reuse attack logic)
+        for c in cards:
+            # For first attack: any rank is fine
+            if not self.table.is_empty():
+                if c.rank not in self.table.valid_pile_on_ranks():
+                    return self._err(f"Rank {c.rank_name} is not on the table; cannot pile on.")
+
+        if self.table.is_empty():
+            if self.phase != GamePhase.ATTACKING:
+                return self._err("Not the attack phase.")
+            if player != self.attacker:
+                return self._err(f"It is {self.attacker.name}'s turn to attack.")
+
+        if player == self.defender:
+            return self._err("The defender cannot attack.")
+
+        # All checks passed — play all cards
+        for c in cards:
+            player.remove_card(c)
+            self.table.add_attack(c)
+
+        self.phase = GamePhase.DEFENDING
+        card_strs = ", ".join(str(c) for c in cards)
+        self._log(f"{player.name} attacks with {len(cards)} cards: {card_strs}")
+        return self._ok()
+
     def defend(self, player: Player, attack_card: Card, defense_card: Card) -> dict:
         """Defender plays a card to beat a specific attack card."""
         if self.phase != GamePhase.DEFENDING:

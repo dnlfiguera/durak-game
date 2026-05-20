@@ -289,6 +289,14 @@ class GameRoom:
             else:
                 result = gs.transfer(player, cards)
 
+        elif action == "multi_attack":
+            raw_cards = data.get("cards", [])
+            cards = [self._parse_card(c, player) for c in raw_cards]
+            if any(c is None for c in cards):
+                result = {"ok": False, "error": "One or more cards not found in hand"}
+            else:
+                result = gs.multi_attack(player, cards)
+
         if not result["ok"]:
             # Send error only to the player who made the mistake
             await pc.send({"type": "error", "message": result["error"]})

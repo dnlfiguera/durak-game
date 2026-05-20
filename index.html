@@ -423,7 +423,7 @@ const ROOM_ID = (function() {
 let ws = null;
 let state = null;          // latest server state
 let myName = "";
-let selectedCard = null;   // card string selected from hand
+let selectedCards = new Set(); // card strings selected from hand (multi-select for same rank)
 let targetedAtk = null;    // attack card on table targeted for defense
 let errorTimeout = null;
 let handOrder = [];         // custom card order maintained by player
@@ -591,7 +591,7 @@ function handleMessage(msg) {
   }
   if (msg.type === "state") {
     state = msg;
-    selectedCard = null;
+    selectedCards.clear();
     targetedAtk = null;
     // Hide game over overlay if a new game started (rematch)
     if (!msg.durak) {
@@ -759,7 +759,7 @@ function renderMyHand() {
     }
 
     if (isValidAtk || isValidDef || isValidTrans) card.classList.add("valid");
-    if (cardStr === selectedCard) card.classList.add("selected");
+    if (selectedCards.has(cardStr)) card.classList.add("selected");
 
     // Drag to reorder
     card.draggable = true;
@@ -937,29 +937,72 @@ function onHandCardClick(cardStr) {
   if (!state) return;
   const phase = state.phase;
 
-  // Attacking or pile-on (any non-defender can pile on)
+  // Attacking or pile-on: tap to select, tap same-rank to add, tap again to play all
   if ((phase === "attacking" && state.is_attacker) ||
       (phase === "pile_on"   && !state.is_defender)) {
+
+    if (selectedCards.has(cardStr)) {
+      // Tapped a selected card — play all selected cards now
+      const cards = [...selectedCards];
+      if (cards.length === 1) {
+        send({ action: "attack", card: cards[0] });
+      } else {
+        send({ action: "multi_attack", cards: cards });
+      }
+      selectedCards.clear();
+      return;
+    }
+
     if (!state.valid_attacks.includes(cardStr)) {
       showError("Can't play that card right now");
       return;
     }
-    send({ action: "attack", card: cardStr });
+
+    // Check if this card has the same rank as already selected cards
+    const cardRank = rankOf(cardStr);
+    if (selectedCards.size > 0) {
+      const firstRank = rankOf([...selectedCards][0]);
+      if (cardRank !== firstRank) {
+        // Different rank — deselect old, select new
+        selectedCards.clear();
+      }
+    }
+
+    selectedCards.add(cardStr);
+
+    // Check if there are more same-rank cards to select
+    const sameRank = state.valid_attacks.filter(c => rankOf(c) === cardRank && !selectedCards.has(c));
+    if (sameRank.length > 0) {
+      setHint(`Selected ${selectedCards.size} card(s) — tap another ${cardRank} to add, or tap selected card to play`);
+      render();
+    } else {
+      // No more same-rank — play immediately
+      const cards = [...selectedCards];
+      if (cards.length === 1) {
+        send({ action: "attack", card: cards[0] });
+      } else {
+        send({ action: "multi_attack", cards: cards });
+      }
+      selectedCards.clear();
+    }
     return;
   }
 
   // Defending — select card first
   if (phase === "defending" && state.is_defender) {
-    if (selectedCard === cardStr) {
-      selectedCard = null;        // deselect
+    if (selectedCards.has(cardStr)) {
+      selectedCards.clear();        // deselect
     } else {
-      selectedCard = cardStr;
+      selectedCards.clear();
+      selectedCards.add(cardStr);
     }
 
+    const sel = selectedCards.size > 0 ? [...selectedCards][0] : null;
+
     // If we already have a table target, try to defend immediately
-    if (targetedAtk && selectedCard) {
-      send({ action: "defend", attack_card: targetedAtk, defense_card: selectedCard });
-      selectedCard = null;
+    if (targetedAtk && sel) {
+      send({ action: "defend", attack_card: targetedAtk, defense_card: sel });
+      selectedCards.clear();
       targetedAtk = null;
     } else {
       render();
@@ -970,10 +1013,11 @@ function onHandCardClick(cardStr) {
 function onTableCardClick(atkCard) {
   if (!state || state.phase !== "defending" || !state.is_defender) return;
 
-  if (selectedCard) {
+  const sel = selectedCards.size > 0 ? [...selectedCards][0] : null;
+  if (sel) {
     // Hand card already selected — defend immediately
-    send({ action: "defend", attack_card: atkCard, defense_card: selectedCard });
-    selectedCard = null;
+    send({ action: "defend", attack_card: atkCard, defense_card: sel });
+    selectedCards.clear();
     targetedAtk = null;
   } else {
     // No hand card yet — set target and wait
@@ -1010,12 +1054,12 @@ function sortHand(mode) {
 }
 
 function onTransfer() {
-  if (!selectedCard) {
+  if (selectedCards.size === 0) {
     showError("Select a same-rank card from your hand first, then press Transfer");
     return;
   }
-  send({ action: "transfer", cards: [selectedCard] });
-  selectedCard = null;
+  send({ action: "transfer", cards: [...selectedCards] });
+  selectedCards.clear();
 }
 
 // ---------------------------------------------------------------------------
