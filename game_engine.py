@@ -389,6 +389,10 @@ class GameState:
         if player == self.defender:
             return self._err("The defender cannot end the attack.")
 
+        # Save current roles for draw order BEFORE rotating
+        old_attacker_index = self.attacker_index
+        old_defender_index = self.defender_index
+
         if not self.table.all_defended():
             # Defender picks up
             self._defender_picks_up()
@@ -396,7 +400,8 @@ class GameState:
             # Table cleared
             self._table_cleared()
 
-        self._refill_hands()
+        # Refill using the OLD attacker/defender (attacker draws first, defender last)
+        self._refill_hands(old_attacker_index, old_defender_index)
         self._check_winners()
 
         if len(self.active_players) <= 1:
@@ -412,8 +417,13 @@ class GameState:
             return self._err("Only the defender can pick up.")
         if self.phase != GamePhase.DEFENDING:
             return self._err("Not the defense phase.")
+
+        # Save current roles for draw order BEFORE rotating
+        old_attacker_index = self.attacker_index
+        old_defender_index = self.defender_index
+
         self._defender_picks_up()
-        self._refill_hands()
+        self._refill_hands(old_attacker_index, old_defender_index)
         self._check_winners()
         if len(self.active_players) <= 1:
             self._end_game()
@@ -525,17 +535,22 @@ class GameState:
         self.attacker_index = self.defender_index
         self.defender_index = (self.attacker_index + 1) % len(self.players)
 
-    def _refill_hands(self):
-        """Refill in order: attacker first, then clockwise, defender last."""
+    def _refill_hands(self, attacker_idx=None, defender_idx=None):
+        """Refill in order: attacker first, then clockwise, defender last.
+        Uses provided indices (from before role rotation) or current roles."""
+        atk_i = attacker_idx if attacker_idx is not None else self.attacker_index
+        def_i = defender_idx if defender_idx is not None else self.defender_index
         order = []
         visited = set()
-        i = self.attacker_index
+        i = atk_i
         while len(order) < len(self.players) - 1:
-            if i != self.defender_index and i not in visited:
+            if i != def_i and i not in visited:
                 order.append(i)
                 visited.add(i)
             i = (i + 1) % len(self.players)
-        order.append(self.defender_index)  # defender always last
+        order.append(def_i)  # defender always last
+
+        self._log(f"Draw order: {[self.players[idx].name for idx in order]}")
         for idx in order:
             self.players[idx].draw_up_to(self.deck)
 
