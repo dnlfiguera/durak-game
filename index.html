@@ -396,12 +396,9 @@
 
 </div>
 
-<!-- Game over overlay -->
-<div id="gameover-overlay">
-
 <!-- Undo request popup -->
 <div id="undo-popup" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;
-  display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center">
+  flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center">
   <div style="background:#1a3a1a;border:2px solid #cc9933;border-radius:16px;padding:24px 32px;max-width:340px">
     <p id="undo-msg" style="font-size:18px;color:#ffd060;margin-bottom:16px"></p>
     <div style="display:flex;gap:12px;justify-content:center">
@@ -410,6 +407,9 @@
     </div>
   </div>
 </div>
+
+<!-- Game over overlay -->
+<div id="gameover-overlay">
   <h1 id="go-title"></h1>
   <div id="go-body"></div>
   <div id="rematch-status" style="color:#aaa;font-size:16px"></div>
