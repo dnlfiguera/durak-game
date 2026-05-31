@@ -134,13 +134,21 @@ class Table:
     Tracks attack/defense pairs in the current round.
     attacks  = list of attack cards in order played
     defenses = dict {attack_card: defense_card}
+    cheat_cards = set of cards that were played with wrong rank (cheating)
+    card_owners = dict {attack_card: player} who played each card
     """
     def __init__(self):
         self.attacks: list[Card] = []
         self.defenses: dict[Card, Card] = {}
+        self.cheat_cards: set[Card] = set()     # cards played illegally
+        self.card_owners: dict[Card, "Player"] = {}  # who played each attack card
 
-    def add_attack(self, card: Card):
+    def add_attack(self, card: Card, player=None, is_cheat=False):
         self.attacks.append(card)
+        if player:
+            self.card_owners[card] = player
+        if is_cheat:
+            self.cheat_cards.add(card)
 
     def add_defense(self, attack_card: Card, defense_card: Card):
         self.defenses[attack_card] = defense_card
@@ -166,12 +174,15 @@ class Table:
     def clear(self):
         self.attacks.clear()
         self.defenses.clear()
+        self.cheat_cards.clear()
+        self.card_owners.clear()
 
     def __repr__(self) -> str:
         pairs = []
         for atk in self.attacks:
             dfn = self.defenses.get(atk, "?")
-            pairs.append(f"{atk}→{dfn}")
+            cheat = " (CHEAT)" if atk in self.cheat_cards else ""
+            pairs.append(f"{atk}→{dfn}{cheat}")
         return "Table[" + ", ".join(pairs) + "]"
 
 
@@ -292,10 +303,6 @@ class GameState:
                 return self._err("Not the attack phase.")
             if player != self.attacker:
                 return self._err(f"It is {self.attacker.name}'s turn to attack.")
-        else:
-            # Pile-on: rank must already be on the table
-            if card.rank not in self.table.valid_pile_on_ranks():
-                return self._err(f"Rank {card.rank_name} is not on the table; cannot pile on.")
 
         # Total undefended cards after this play cannot exceed defender's hand size
         new_undefended = len(self.table.undefended()) + 1
@@ -304,8 +311,14 @@ class GameState:
                 f"Cannot attack: {self.defender.name} only has {len(self.defender.hand)} card(s)."
             )
 
+        # Check if this is a valid pile-on or a cheat
+        is_cheat = False
+        if not self.table.is_empty():
+            if card.rank not in self.table.valid_pile_on_ranks():
+                is_cheat = True  # allowed but marked as cheat — defender can call it
+
         player.remove_card(card)
-        self.table.add_attack(card)
+        self.table.add_attack(card, player=player, is_cheat=is_cheat)
         old_phase = self.phase
         self.phase = GamePhase.DEFENDING
         self._log(f"{player.name} attacks with {card}")
@@ -341,12 +354,14 @@ class GameState:
                 f"{self.defender.name} only has {len(self.defender.hand)} card(s)."
             )
 
-        # Validate each card individually (reuse attack logic)
+        # Check which cards are cheats (wrong rank for pile-on)
+        cheat_flags = []
         for c in cards:
-            # For first attack: any rank is fine
             if not self.table.is_empty():
-                if c.rank not in self.table.valid_pile_on_ranks():
-                    return self._err(f"Rank {c.rank_name} is not on the table; cannot pile on.")
+                is_cheat = c.rank not in self.table.valid_pile_on_ranks()
+            else:
+                is_cheat = False
+            cheat_flags.append(is_cheat)
 
         if self.table.is_empty():
             if self.phase != GamePhase.ATTACKING:
@@ -359,9 +374,9 @@ class GameState:
 
         # All checks passed — play all cards
         old_phase = self.phase
-        for c in cards:
+        for c, is_cheat in zip(cards, cheat_flags):
             player.remove_card(c)
-            self.table.add_attack(c)
+            self.table.add_attack(c, player=player, is_cheat=is_cheat)
 
         self.phase = GamePhase.DEFENDING
         card_strs = ", ".join(str(c) for c in cards)
@@ -437,6 +452,46 @@ class GameState:
             return self._ok()
 
         return self._err("Cannot undo this action.")
+
+    def call_cheating(self, player: Player, attack_card: Card) -> dict:
+        """
+        Defender calls cheating on an undefended attack card.
+        If the card was a cheat (wrong rank), it goes back to the attacker's hand.
+        If the card was legitimate, the call fails.
+        Can only be called on undefended cards (once defended, it's too late).
+        """
+        if player != self.defender:
+            return self._err("Only the defender can call cheating.")
+        if attack_card not in self.table.undefended():
+            return self._err(f"{attack_card} is already defended — too late to call cheating!")
+        if attack_card not in self.table.attacks:
+            return self._err(f"{attack_card} is not on the table.")
+
+        if attack_card in self.table.cheat_cards:
+            # It IS a cheat — card goes back to the attacker
+            owner = self.table.card_owners.get(attack_card)
+            self.table.attacks.remove(attack_card)
+            self.table.cheat_cards.discard(attack_card)
+            if attack_card in self.table.card_owners:
+                del self.table.card_owners[attack_card]
+            if owner:
+                owner.hand.append(attack_card)
+                self._log(f"CHEATING CAUGHT! {player.name} caught {owner.name} — "
+                          f"{attack_card} goes back to {owner.name}'s hand!")
+            else:
+                self._log(f"CHEATING CAUGHT! {attack_card} removed from table!")
+
+            # If table is now empty, go back to attacking phase
+            if self.table.is_empty():
+                self.phase = GamePhase.ATTACKING
+            elif self.table.all_defended():
+                self.phase = GamePhase.PILE_ON
+
+            return {"ok": True, "error": None, "was_cheat": True}
+        else:
+            # Not a cheat — wrong call
+            self._log(f"{player.name} called cheating on {attack_card} — but it was legitimate!")
+            return {"ok": True, "error": None, "was_cheat": False}
 
     def end_attack(self, player: Player) -> dict:
         """

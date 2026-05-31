@@ -781,17 +781,16 @@ function renderMyHand() {
   ordered.forEach((cardStr, idx) => {
     const card = makeCardFace(cardStr, true);
 
-    // Highlight valid moves
-    const isValidAtk = state.valid_attacks.includes(cardStr);
-    const isValidTrans = state.valid_transfers.includes(cardStr);
-    let isValidDef = false;
-    if (targetedAtk && state.valid_defenses[targetedAtk]) {
-      isValidDef = state.valid_defenses[targetedAtk].includes(cardStr);
-    } else {
-      isValidDef = Object.values(state.valid_defenses).some(arr => arr.includes(cardStr));
-    }
-
-    if (isValidAtk || isValidDef || isValidTrans) card.classList.add("valid");
+    // Valid move highlights (commented out for now — cards should look the same)
+    // const isValidAtk = state.valid_attacks.includes(cardStr);
+    // const isValidTrans = state.valid_transfers.includes(cardStr);
+    // let isValidDef = false;
+    // if (targetedAtk && state.valid_defenses[targetedAtk]) {
+    //   isValidDef = state.valid_defenses[targetedAtk].includes(cardStr);
+    // } else {
+    //   isValidDef = Object.values(state.valid_defenses).some(arr => arr.includes(cardStr));
+    // }
+    // if (isValidAtk || isValidDef || isValidTrans) card.classList.add("valid");
     if (selectedCards.has(cardStr)) card.classList.add("selected");
 
     // Drag to reorder
@@ -910,6 +909,14 @@ function renderActionBar() {
     addBtn(el, "Pick Up", "danger", () => send({ action: "pickup" }));
   }
 
+  // Call Cheating (defender, when a table card is targeted)
+  if (phase === "defending" && state.is_defender && targetedAtk) {
+    addBtn(el, `Cheating! (${targetedAtk})`, "danger", () => {
+      send({ action: "call_cheating", card: targetedAtk });
+      targetedAtk = null;
+    });
+  }
+
   // Transfer (defender with matching rank)
   if (phase === "defending" && state.is_defender && state.can_transfer) {
     addBtn(el, `Transfer to ${state.transfer_target}`, "transfer", onTransfer);
@@ -950,9 +957,9 @@ function renderHint() {
     hint = `Waiting for ${state.attacker} to attack...`;
   else if (phase === "defending" && state.is_defender) {
     if (targetedAtk)
-      hint = `Now pick a card from your hand to beat  ${targetedAtk}`;
+      hint = `Defend ${targetedAtk} with a card, or press Cheating! if it's illegal`;
     else
-      hint = "Tap an attack card on the table, then pick your defense card";
+      hint = "Tap an attack card on the table to defend or call cheating";
   }
   else if (phase === "defending" && !state.is_defender)
     hint = state.valid_attacks.length > 0 
@@ -991,11 +998,7 @@ function onHandCardClick(cardStr) {
       return;
     }
 
-    if (!state.valid_attacks.includes(cardStr)) {
-      showError("Can't play that card right now");
-      return;
-    }
-
+    // Any card can be played (cheating is allowed — defender can call it!)
     // Check if this card has the same rank as already selected cards
     const cardRank = rankOf(cardStr);
     if (selectedCards.size > 0) {
@@ -1009,7 +1012,7 @@ function onHandCardClick(cardStr) {
     selectedCards.add(cardStr);
 
     // Check if there are more same-rank cards to select
-    const sameRank = state.valid_attacks.filter(c => rankOf(c) === cardRank && !selectedCards.has(c));
+    const sameRank = state.your_hand.filter(c => rankOf(c) === cardRank && !selectedCards.has(c));
     if (sameRank.length > 0) {
       setHint(`Selected ${selectedCards.size} card(s) — tap another ${cardRank} to add, or tap selected card to play`);
       render();
