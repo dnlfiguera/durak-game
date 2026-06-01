@@ -306,6 +306,13 @@ class GameRoom:
             else:
                 result = gs.call_cheating(player, atk_card)
 
+        elif action == "call_defense_cheating":
+            atk_card = self._parse_card_str(data.get("card"))
+            if atk_card is None:
+                result = {"ok": False, "error": "Card not found on table"}
+            else:
+                result = gs.call_defense_cheating(player, atk_card)
+
         if not result["ok"]:
             # Send error only to the player who made the mistake
             await pc.send({"type": "error", "message": result["error"]})

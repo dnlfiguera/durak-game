@@ -439,6 +439,7 @@ let state = null;          // latest server state
 let myName = "";
 let selectedCards = new Set(); // card strings selected from hand (multi-select for same rank)
 let targetedAtk = null;    // attack card on table targeted for defense
+let targetedDef = null;    // defended pair targeted by attacker for cheating call
 let errorTimeout = null;
 let handOrder = [];         // custom card order maintained by player
 let dragIdx = null;         // index being dragged
@@ -626,6 +627,7 @@ function handleMessage(msg) {
     state = msg;
     selectedCards.clear();
     targetedAtk = null;
+    targetedDef = null;
     // Hide game over overlay if a new game started (rematch)
     if (!msg.durak) {
       document.getElementById("gameover-overlay").style.display = "none";
@@ -753,7 +755,19 @@ function renderTable() {
 
     const dfn = defenses[atk];
     if (dfn) {
-      pair.appendChild(makeCardFace(dfn, false));
+      const dfnCard = makeCardFace(dfn, false);
+      // Attacker can click defense cards to call cheating (during pile_on or defending)
+      const canChallenge = !state.is_defender &&
+        (state.phase === "pile_on" || state.phase === "defending");
+      if (canChallenge) {
+        dfnCard.classList.add("table-target");
+        if (targetedDef === atk) dfnCard.classList.add("targeted");
+        dfnCard.onclick = () => {
+          targetedDef = (targetedDef === atk) ? null : atk;
+          render();
+        };
+      }
+      pair.appendChild(dfnCard);
     } else {
       const slot = document.createElement("div");
       slot.className = "card defense-slot";
@@ -925,6 +939,14 @@ function renderActionBar() {
   // End attack (any non-defender can end during pile_on, but only main attacker's button)
   if (phase === "pile_on" && state.is_attacker) {
     addBtn(el, "End Attack", "", () => send({ action: "end_attack" }));
+  }
+
+  // Call cheating on a defense card (attacker)
+  if (!state.is_defender && targetedDef && state.table.defenses[targetedDef]) {
+    addBtn(el, `Cheating! (${state.table.defenses[targetedDef]})`, "danger", () => {
+      send({ action: "call_defense_cheating", card: targetedDef });
+      targetedDef = null;
+    });
   }
 
   // Pile on hint for non-attacker helpers (3+ players)

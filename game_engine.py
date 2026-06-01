@@ -140,7 +140,8 @@ class Table:
     def __init__(self):
         self.attacks: list[Card] = []
         self.defenses: dict[Card, Card] = {}
-        self.cheat_cards: set[Card] = set()     # cards played illegally
+        self.cheat_cards: set[Card] = set()         # attack cards played illegally
+        self.cheat_defenses: set[Card] = set()      # attack cards whose defense was invalid
         self.card_owners: dict[Card, "Player"] = {}  # who played each attack card
 
     def add_attack(self, card: Card, player=None, is_cheat=False):
@@ -150,8 +151,10 @@ class Table:
         if is_cheat:
             self.cheat_cards.add(card)
 
-    def add_defense(self, attack_card: Card, defense_card: Card):
+    def add_defense(self, attack_card: Card, defense_card: Card, is_cheat=False):
         self.defenses[attack_card] = defense_card
+        if is_cheat:
+            self.cheat_defenses.add(attack_card)
 
     def undefended(self) -> list[Card]:
         return [c for c in self.attacks if c not in self.defenses]
@@ -175,6 +178,7 @@ class Table:
         self.attacks.clear()
         self.defenses.clear()
         self.cheat_cards.clear()
+        self.cheat_defenses.clear()
         self.card_owners.clear()
 
     def __repr__(self) -> str:
@@ -388,7 +392,8 @@ class GameState:
         return self._ok()
 
     def defend(self, player: Player, attack_card: Card, defense_card: Card) -> dict:
-        """Defender plays a card to beat a specific attack card."""
+        """Defender plays a card to beat a specific attack card.
+        Invalid defenses are allowed (cheating) — attacker must catch them."""
         if self.phase != GamePhase.DEFENDING:
             return self._err("Not the defense phase.")
         if player != self.defender:
@@ -397,11 +402,12 @@ class GameState:
             return self._err(f"{attack_card} is already defended or not on the table.")
         if not player.has_card(defense_card):
             return self._err(f"{player.name} does not have {defense_card}.")
-        if not defense_card.beats(attack_card, self.trump):
-            return self._err(f"{defense_card} cannot beat {attack_card}.")
+
+        # Check if defense is valid — allow it either way, but mark cheats
+        is_cheat = not defense_card.beats(attack_card, self.trump)
 
         player.remove_card(defense_card)
-        self.table.add_defense(attack_card, defense_card)
+        self.table.add_defense(attack_card, defense_card, is_cheat=is_cheat)
         self._log(f"{player.name} defends {attack_card} with {defense_card}")
 
         old_phase = self.phase
@@ -491,6 +497,35 @@ class GameState:
         else:
             # Not a cheat — wrong call
             self._log(f"{player.name} called cheating on {attack_card} — but it was legitimate!")
+            return {"ok": True, "error": None, "was_cheat": False}
+
+    def call_defense_cheating(self, player: Player, attack_card: Card) -> dict:
+        """
+        Attacker (or any non-defender) calls cheating on a defense card.
+        If the defense was invalid (card doesn't actually beat the attack),
+        the defense card goes back to the defender's hand and the attack becomes undefended.
+        Must be called BEFORE end_attack — pressing End Attack accepts all defenses.
+        """
+        if player == self.defender:
+            return self._err("Only the attacker can call cheating on a defense.")
+        if attack_card not in self.table.defenses:
+            return self._err(f"{attack_card} has no defense to challenge.")
+
+        defense_card = self.table.defenses[attack_card]
+
+        if attack_card in self.table.cheat_defenses:
+            # It IS a cheat — defense card goes back to defender
+            del self.table.defenses[attack_card]
+            self.table.cheat_defenses.discard(attack_card)
+            self.defender.hand.append(defense_card)
+            self._log(f"DEFENSE CHEAT CAUGHT! {player.name} caught {self.defender.name} — "
+                      f"{defense_card} goes back (didn't beat {attack_card})!")
+            self.phase = GamePhase.DEFENDING
+            return {"ok": True, "error": None, "was_cheat": True}
+        else:
+            # Not a cheat — defense was valid
+            self._log(f"{player.name} challenged defense {defense_card} on {attack_card} — "
+                      f"but it was a valid defense!")
             return {"ok": True, "error": None, "was_cheat": False}
 
     def end_attack(self, player: Player) -> dict:
